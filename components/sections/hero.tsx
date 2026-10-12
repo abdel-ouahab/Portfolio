@@ -7,6 +7,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { CvLink } from "@/components/ui/cv-link";
 import DottedTrailCursor from "@/components/ui/dotted-trail-cursor";
 import TechText from "@/components/ui/tech-text";
+import TextType from "@/components/ui/text-type";
 import { SocialLinks } from "@/components/layout/social-links";
 import { AvailabilityBadge } from "@/components/sections/availability-badge";
 import { HeroBand } from "@/components/sections/hero-band";
@@ -28,8 +29,26 @@ export function Hero() {
       >
         <div className="mx-auto max-w-6xl px-5 pt-14 sm:px-8 sm:pt-20 lg:pt-24">
           <h1 id="hero-title" className="text-[15px] font-medium">
-            {profile.name}
-            <span className="block font-normal text-muted">{profile.role}</span>
+            <span className="sr-only">
+              {profile.name}, {profile.role}
+            </span>
+            {/* Visual-only typing; each line keeps its height so nothing below shifts */}
+            <span className="block min-h-[1lh]">
+              <TextType as="span" text={profile.name} typingSpeed={55} loop={false} showCursor={false} />
+            </span>
+            <span className="block min-h-[1lh] font-normal text-muted">
+              <TextType
+                as="span"
+                text={profile.role.split(" | ")}
+                fallbackText={profile.role}
+                initialDelay={1500}
+                typingSpeed={60}
+                deletingSpeed={30}
+                pauseDuration={2200}
+                cursorCharacter="▍"
+                cursorClassName="text-accent"
+              />
+            </span>
           </h1>
 
           <div className="mt-8 grid gap-10 lg:grid-cols-12 lg:items-end lg:gap-12">
