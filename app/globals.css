@@ -1,26 +1,346 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ---------- Design tokens ---------- */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f3f4f1;
+  --surface: #ffffff;
+  --surface-sunken: #e9ebe6;
+  --foreground: #14171c;
+  --muted: #545b64;
+  --line: #d6d9d3;
+  --line-strong: #b9beb6;
+  --accent: #0c6478;
+  --accent-contrast: #ffffff;
+  --accent-soft: rgb(12 100 120 / 0.09);
+  --status-open: #1d7a46;
+  --status-limited: #9a6400;
+  --status-unavailable: #8a9098;
+  --danger: #b42318;
+  /* Hero cursor trail: pale enough that ink text stays readable over it */
+  --trail-a: #c9e0e4;
+  --trail-b: #dde8dc;
+  color-scheme: light;
+}
+
+.dark {
+  --background: #101418;
+  --surface: #171c21;
+  --surface-sunken: #0c0f12;
+  --foreground: #e4e7e2;
+  --muted: #98a1aa;
+  --line: #2a3138;
+  --line-strong: #3d4650;
+  --accent: #5db8cc;
+  --accent-contrast: #0b1a1f;
+  --accent-soft: rgb(93 184 204 / 0.12);
+  --status-open: #4cc27f;
+  --status-limited: #e0a33a;
+  --status-unavailable: #6f7882;
+  --danger: #f2877d;
+  --trail-a: #17414b;
+  --trail-b: #1c2f3b;
+  color-scheme: dark;
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-sunken: var(--surface-sunken);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-accent: var(--accent);
+  --color-accent-contrast: var(--accent-contrast);
+  --color-accent-soft: var(--accent-soft);
+  --color-status-open: var(--status-open);
+  --color-status-limited: var(--status-limited);
+  --color-status-unavailable: var(--status-unavailable);
+  --color-danger: var(--danger);
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  /* Type scale (roughly a major third from 16px) */
+  --text-display: clamp(2.375rem, 1.6rem + 3.4vw, 4.25rem);
+  --text-display--line-height: 1.04;
+  --text-display--letter-spacing: -0.035em;
+  --text-title: clamp(1.75rem, 1.4rem + 1.4vw, 2.5rem);
+  --text-title--line-height: 1.12;
+  --text-title--letter-spacing: -0.025em;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* ---------- Base ---------- */
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    scroll-padding-top: 5.5rem;
+  }
+
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-feature-settings: "ss01", "cv11";
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background: var(--accent);
+    color: var(--accent-contrast);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
+
+  /* Theme switch without a flash of transitioning colors */
+  .theme-switching,
+  .theme-switching * {
+    transition: none !important;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  /* The hero band handles reduced motion itself by pausing in place. */
+  *:not([data-motion-managed] *),
+  *:not([data-motion-managed] *)::before,
+  *:not([data-motion-managed] *)::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---------- Logo mark cursor (components/ui/logo-mark.tsx) ---------- */
+.group:hover .logo-cursor,
+.group:focus-visible .logo-cursor {
+  animation: logo-blink 1s steps(1, end) infinite;
+}
+
+@keyframes logo-blink {
+  50% { opacity: 0; }
+}
+
+/* ---------- Cinematic section reveal (components/ui/motion-footer.tsx) ---------- */
+.reveal-panel {
+  --pill-bg-1: color-mix(in oklch, var(--foreground) 3%, transparent);
+  --pill-bg-2: color-mix(in oklch, var(--foreground) 1%, transparent);
+  --pill-shadow: color-mix(in oklch, var(--background) 50%, transparent);
+  --pill-highlight: color-mix(in oklch, var(--foreground) 10%, transparent);
+  --pill-inset-shadow: color-mix(in oklch, var(--background) 80%, transparent);
+  --pill-border: color-mix(in oklch, var(--foreground) 10%, transparent);
+  --pill-bg-1-hover: color-mix(in oklch, var(--foreground) 8%, transparent);
+  --pill-bg-2-hover: color-mix(in oklch, var(--foreground) 2%, transparent);
+  --pill-border-hover: color-mix(in oklch, var(--foreground) 22%, transparent);
+  --pill-shadow-hover: color-mix(in oklch, var(--background) 70%, transparent);
+  --pill-highlight-hover: color-mix(in oklch, var(--foreground) 20%, transparent);
+}
+
+@keyframes reveal-breathe {
+  from { transform: scale(1); opacity: 0.6; }
+  to { transform: scale(1.1); opacity: 1; }
+}
+
+@keyframes reveal-marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+.reveal-aurora {
+  background: radial-gradient(
+    circle at 50% 50%,
+    color-mix(in oklch, var(--accent) 16%, transparent) 0%,
+    color-mix(in oklch, var(--status-open) 10%, transparent) 40%,
+    transparent 70%
+  );
+  animation: reveal-breathe 8s ease-in-out infinite alternate;
+}
+
+.reveal-marquee {
+  animation: reveal-marquee 40s linear infinite;
+}
+
+.reveal-grid {
+  background-size: 60px 60px;
+  background-image:
+    linear-gradient(to right, color-mix(in oklch, var(--foreground) 4%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in oklch, var(--foreground) 4%, transparent) 1px, transparent 1px);
+  mask-image: linear-gradient(to bottom, transparent, black 30%, black 70%, transparent);
+}
+
+/* Transform is left out of the transition: GSAP drives it on the magnetic pills. */
+.reveal-pill {
+  background: linear-gradient(145deg, var(--pill-bg-1) 0%, var(--pill-bg-2) 100%);
+  box-shadow:
+    0 10px 30px -10px var(--pill-shadow),
+    inset 0 1px 1px var(--pill-highlight),
+    inset 0 -1px 2px var(--pill-inset-shadow);
+  border: 1px solid var(--pill-border);
+  backdrop-filter: blur(16px);
+  transition-property: background, border-color, box-shadow, color;
+  transition-duration: 0.4s;
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.reveal-pill:hover {
+  background: linear-gradient(145deg, var(--pill-bg-1-hover) 0%, var(--pill-bg-2-hover) 100%);
+  border-color: var(--pill-border-hover);
+  box-shadow:
+    0 20px 40px -10px var(--pill-shadow-hover),
+    inset 0 1px 1px var(--pill-highlight-hover);
+}
+
+/* Sized by letter count (--chars) so long words still fit the viewport. */
+.reveal-word {
+  font-size: min(26vw, calc(140vw / var(--chars)));
+  line-height: 0.75;
+  font-weight: 900;
+  letter-spacing: -0.05em;
+  color: transparent;
+  -webkit-text-stroke: 1px color-mix(in oklch, var(--foreground) 6%, transparent);
+  background: linear-gradient(180deg, color-mix(in oklch, var(--foreground) 11%, transparent) 0%, transparent 60%);
+  background-clip: text;
+}
+
+.reveal-heading {
+  background: linear-gradient(180deg, var(--foreground) 0%, color-mix(in oklch, var(--foreground) 45%, transparent) 100%);
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  filter: drop-shadow(0 0 20px color-mix(in oklch, var(--foreground) 15%, transparent));
+}
+
+/* ---------- Reveal panel scenes (components/sections/reveal-scenes.tsx) ---------- */
+.reveal-print {
+  box-shadow:
+    0 1px 2px color-mix(in oklch, var(--foreground) 10%, transparent),
+    0 18px 36px -12px color-mix(in oklch, var(--foreground) 28%, transparent);
+}
+
+.reveal-window,
+.reveal-node {
+  box-shadow: 0 24px 48px -20px color-mix(in oklch, var(--foreground) 30%, transparent);
+}
+
+.dark .reveal-print,
+.dark .reveal-window,
+.dark .reveal-node {
+  box-shadow: 0 24px 48px -16px rgb(0 0 0 / 0.6);
+}
+
+/* Wires fade out behind the heading so it stays readable. Stroke width is in
+   viewBox units (the 0-100 box stretches to the panel), about 1.5px on screen. */
+.reveal-wires {
+  stroke: var(--line-strong);
+  stroke-width: 0.14;
+  mask-image: radial-gradient(ellipse 34% 16% at 50% 55%, transparent 40%, black 100%);
+}
+
+@keyframes reveal-ping {
+  from { transform: translate(-50%, -50%) scale(0.6); opacity: 0.5; }
+  to { transform: translate(-50%, -50%) scale(3.2); opacity: 0; }
+}
+
+.reveal-ping {
+  animation: reveal-ping 4.5s cubic-bezier(0.2, 0.6, 0.3, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal-ping {
+    display: none;
+  }
+}
+
+/* ---------- Skills shelf (components/sections/skills-explorer.tsx) ---------- */
+/* --brand is the tool's brand color; marks without one follow the text color. */
+.tool-logo {
+  color: var(--brand, var(--foreground));
+  background: color-mix(in oklch, var(--brand, var(--foreground)) 10%, transparent);
+}
+
+.dark .tool-logo {
+  color: color-mix(in oklch, var(--brand, var(--foreground)) 75%, white);
+  background: color-mix(in oklch, var(--brand, var(--foreground)) 18%, transparent);
+}
+
+/* One-time cascade when the shelf first scrolls into view. */
+.skill-shelf[data-entrance="waiting"] .tool-tile {
+  opacity: 0;
+  translate: 0 10px;
+  scale: 0.94;
+}
+
+.skill-shelf[data-entrance="entering"] .tool-tile {
+  transition:
+    opacity 0.5s ease,
+    translate 0.6s cubic-bezier(0.2, 0.8, 0.2, 1),
+    scale 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition-delay: calc(var(--i) * 22ms);
+}
+
+.skill-shelf[data-entrance="settled"] .tool-tile {
+  transition:
+    border-color 0.3s ease,
+    translate 0.3s ease,
+    box-shadow 0.3s ease;
+}
+
+/* Responds to the area opened on the orbit. */
+.shelf-row {
+  transition:
+    opacity 0.35s ease,
+    filter 0.35s ease;
+}
+
+.shelf-row[data-state="dim"] {
+  opacity: 0.35;
+  filter: grayscale(1);
+}
+
+.shelf-row[data-state="related"] {
+  opacity: 0.8;
+}
+
+.shelf-row[data-state="active"] .shelf-heading {
+  color: var(--accent);
+}
+
+.shelf-row[data-state="active"] .tool-tile {
+  border-color: color-mix(in oklch, var(--brand, var(--accent)) 50%, var(--line));
+  translate: 0 -2px;
+  box-shadow: 0 10px 20px -12px color-mix(in oklch, var(--brand, var(--foreground)) 55%, transparent);
+}
+
+/* ---------- Skills orbit (components/sections/skills-orbit.tsx) ---------- */
+.orbit-share {
+  stroke: var(--accent);
+}
+
+.orbit-share[data-state="related"] {
+  opacity: 0.5;
+}
+
+.orbit-share[data-state="dim"] {
+  stroke: var(--line-strong);
+}
+
+@keyframes orbit-link-draw {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+
+.orbit-link {
+  stroke: var(--accent);
+  stroke-width: 1.25;
+  stroke-dasharray: 1;
+  opacity: 0.6;
+  /* Waits for the orbit's 700ms turn so the links land on the settled nodes. */
+  animation: orbit-link-draw 0.5s ease-out 0.6s both;
 }
