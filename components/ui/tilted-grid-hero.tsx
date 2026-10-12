@@ -144,6 +144,7 @@ export function TiltedGridHero({
   const orbit = `tgh-o-${id}`;
   const shade = `tgh-s-${id}`;
   const tile = `tgh-t-${id}`;
+  const root = `tgh-r-${id}`;
   const bend = (Math.min(85, Math.max(5, curve)) * Math.PI) / 180;
 
   // Null until the observer has measured the hero. The band stays hidden
@@ -174,6 +175,19 @@ export function TiltedGridHero({
     ro.observe(el);
     return () => ro.disconnect();
   }, [tileHeight, aspectRatio, gap, bend]);
+
+  // Every strip is its own 3D layer with two endless animations, so the band
+  // pauses while scrolled out of view instead of keeping the GPU busy. All
+  // tiles pause together, so they stay in phase.
+  React.useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const io = new IntersectionObserver(([entry]) => {
+      el.toggleAttribute("data-offscreen", !entry.isIntersecting);
+    });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
 
   // Fetch every image up front. A tile picks up its next one just before
   // it comes back into view, too late to start loading it then.
@@ -214,7 +228,8 @@ export function TiltedGridHero({
     // Pausing rather than removing the motion keeps the band whole: every
     // tile is already placed by its negative delay, so it freezes as a
     // finished still.
-    `@media(prefers-reduced-motion:reduce){.${tile},.${tile}>div{animation-play-state:paused}}`;
+    `@media(prefers-reduced-motion:reduce){.${tile},.${tile}>div{animation-play-state:paused}}` +
+    `.${root}[data-offscreen] .${tile},.${root}[data-offscreen] .${tile}>div{animation-play-state:paused}`;
 
   const share = aspectRatio / SLICES;
   const duration = columns * speed;
@@ -225,7 +240,7 @@ export function TiltedGridHero({
   return (
     <div
       ref={ref}
-      className={cn("relative overflow-hidden", className)}
+      className={cn(root, "relative overflow-hidden", className)}
       {...props}
       style={{ containerType: "size", ...props.style }}
     >

@@ -356,6 +356,11 @@ export default function PolaroidLineCarousel({
     let raf = 0
     let prev = performance.now()
     const S = sim.current
+    // Last values written per card and for the string, so a frame only touches
+    // the styles that changed (the transforms change every frame, these rarely)
+    const shown: boolean[] = []
+    const layers: number[] = []
+    let stringPath = ""
     const frame = (now: number) => {
       raf = 0
       if (!visible) return
@@ -379,11 +384,12 @@ export default function PolaroidLineCarousel({
         const el = cards.current[i]
         if (!el) continue
         const x = w / 2 + i * spacing - S.off
-        if (x < -cw * 1.5 || x > w + cw * 1.5) {
-          el.style.visibility = "hidden"
-          continue
+        const onStage = x >= -cw * 1.5 && x <= w + cw * 1.5
+        if (shown[i] !== onStage) {
+          shown[i] = onStage
+          el.style.visibility = onStage ? "visible" : "hidden"
         }
-        el.style.visibility = "visible"
+        if (!onStage) continue
         let a = S.a[i] || 0
         let av = S.w[i] || 0
         ;[a, av] = swingStep(a, av, lineVel, dt, g)
@@ -392,9 +398,17 @@ export default function PolaroidLineCarousel({
         S.w[i] = av
         const y = stringY(x, w, y0, o.sag) - 6
         el.style.transform = "translate(" + (x - cw / 2).toFixed(1) + "px," + y.toFixed(1) + "px) rotate(" + a.toFixed(4) + "rad)"
-        el.style.zIndex = String(i === near ? n + 1 : n - Math.abs(i - near))
+        const layer = i === near ? n + 1 : n - Math.abs(i - near)
+        if (layers[i] !== layer) {
+          layers[i] = layer
+          el.style.zIndex = String(layer)
+        }
       }
-      pathRef.current?.setAttribute("d", "M0 " + y0 + " Q" + w / 2 + " " + (y0 + 2 * o.sag) + " " + w + " " + y0)
+      const path = "M0 " + y0 + " Q" + w / 2 + " " + (y0 + 2 * o.sag) + " " + w + " " + y0
+      if (path !== stringPath) {
+        stringPath = path
+        pathRef.current?.setAttribute("d", path)
+      }
       if (near !== activeRef.current) {
         activeRef.current = near
         setActive(near)

@@ -297,7 +297,7 @@ export function CinematicReveal({ word, heading, marquee, children, scene, class
     >
       {/* Starts off-screen: below the fold, the browser skips painting its layers */}
       <div ref={panelRef} data-offscreen="" className="reveal-panel fixed inset-x-0 bottom-0 flex h-screen flex-col overflow-hidden bg-background text-foreground">
-        <div aria-hidden className="reveal-aurora pointer-events-none absolute left-[10vw] top-[20vh] h-[60vh] w-[80vw] rounded-[50%] blur-[80px]" />
+        <div aria-hidden className="reveal-aurora pointer-events-none absolute left-[10vw] top-[20vh] h-[60vh] w-[80vw] rounded-[50%] md:blur-[80px]" />
         <div aria-hidden className="reveal-grid pointer-events-none absolute inset-0" />
 
         <div
@@ -317,7 +317,9 @@ export function CinematicReveal({ word, heading, marquee, children, scene, class
 
         <div
           aria-hidden
-          className="absolute left-0 top-24 z-10 w-full -rotate-2 scale-110 overflow-hidden border-y border-line bg-background/60 py-4 shadow-2xl backdrop-blur-md"
+          // Phones get a solid band: a backdrop blur over the breathing aurora is
+          // recomputed every frame
+          className="absolute left-0 top-24 z-10 w-full -rotate-2 scale-110 overflow-hidden border-y border-line bg-background/90 py-4 shadow-2xl md:bg-background/60 md:backdrop-blur-md"
         >
           <div className="reveal-marquee flex w-max text-xs font-semibold uppercase tracking-[0.3em] text-muted md:text-sm">
             {[0, 1].map((copy) => (

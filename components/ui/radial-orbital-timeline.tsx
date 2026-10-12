@@ -86,6 +86,16 @@ const statusVariant = {
   pending: "secondary",
 } as const;
 
+function nodePosition(index: number, total: number, rotation: number, radius: number) {
+  const angle = ((index / total) * 360 + rotation) % 360;
+  const radian = (angle * Math.PI) / 180;
+  const x = radius * Math.cos(radian);
+  const y = radius * Math.sin(radian);
+  const zIndex = Math.round(100 + 50 * Math.cos(radian));
+  const opacity = Math.max(0.75, Math.min(1, 0.75 + 0.25 * ((1 + Math.sin(radian)) / 2)));
+  return { x, y, zIndex, opacity };
+}
+
 export default function RadialOrbitalTimeline({
   timelineData,
   radius: maxRadius = 200,
@@ -107,6 +117,11 @@ export default function RadialOrbitalTimeline({
   const [containerHeight, setContainerHeight] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const orbitRef = useRef<HTMLDivElement>(null);
+  const nodeRefs = useRef<(HTMLDivElement | null)[]>([]);
+  // The live angle. While the orbit turns, frames write node styles straight to
+  // the DOM and React state only catches up when it stops, so the orbit doesn't
+  // re-render on every frame.
+  const angleRef = useRef(0);
   const reducedMotion = usePrefersReducedMotion();
   const baseId = useId();
 
@@ -116,14 +131,37 @@ export default function RadialOrbitalTimeline({
   };
 
   const rotating = autoRotate && !hovering && inView && !reducedMotion;
+  const total = timelineData.length;
 
   useEffect(() => {
     if (!rotating) return;
-    const timer = setInterval(() => {
-      setRotationAngle((prev) => Number(((prev + speed) % 360).toFixed(3)));
-    }, 50);
-    return () => clearInterval(timer);
-  }, [rotating, speed]);
+    const orbit = orbitRef.current;
+    // Turns off the nodes' transitions, which would otherwise restart every frame
+    orbit?.setAttribute("data-rotating", "");
+    let raf = 0;
+    let last = performance.now();
+    const frame = (now: number) => {
+      // `speed` is degrees per 50ms; the cap keeps a stalled frame from jumping
+      // A frame's timestamp can predate the effect, so the first step is clamped at 0
+      angleRef.current = (angleRef.current + (Math.min(Math.max(now - last, 0), 100) / 50) * speed) % 360;
+      last = now;
+      for (let index = 0; index < total; index++) {
+        const node = nodeRefs.current[index];
+        if (!node) continue;
+        const { x, y, zIndex, opacity } = nodePosition(index, total, angleRef.current, radius);
+        node.style.transform = `translate(${x}px, ${y}px)`;
+        node.style.zIndex = String(zIndex);
+        node.style.opacity = String(opacity);
+      }
+      raf = requestAnimationFrame(frame);
+    };
+    raf = requestAnimationFrame(frame);
+    return () => {
+      cancelAnimationFrame(raf);
+      orbit?.removeAttribute("data-rotating");
+      setRotationAngle(angleRef.current);
+    };
+  }, [rotating, speed, radius, total]);
 
   // Fit the orbit to the container and pause rotation while off-screen.
   useEffect(() => {
@@ -132,6 +170,9 @@ export default function RadialOrbitalTimeline({
     const resize = new ResizeObserver(([entry]) => {
       const { width, height } = entry.contentRect;
       setContainerHeight(height);
+      // Synced in the same render as the radius, so a resize mid-turn re-renders
+      // the nodes where they are instead of at the angle the state last held
+      setRotationAngle(angleRef.current);
       setRadius(Math.max(80, Math.min(maxRadius, width / 2 - edgeMargin, height / 2 - edgeMargin)));
     });
     const visibility = new IntersectionObserver(([entry]) => setInView(entry.isIntersecting));
@@ -183,17 +224,8 @@ export default function RadialOrbitalTimeline({
     setAutoRotate(false);
     // Bring the opened node to the top of the orbit, so its card hangs into the centre.
     const index = timelineData.findIndex((item) => item.id === id);
-    setRotationAngle(270 - (index / timelineData.length) * 360);
-  };
-
-  const calculateNodePosition = (index: number, total: number) => {
-    const angle = ((index / total) * 360 + rotationAngle) % 360;
-    const radian = (angle * Math.PI) / 180;
-    const x = radius * Math.cos(radian);
-    const y = radius * Math.sin(radian);
-    const zIndex = Math.round(100 + 50 * Math.cos(radian));
-    const opacity = Math.max(0.75, Math.min(1, 0.75 + 0.25 * ((1 + Math.sin(radian)) / 2)));
-    return { x, y, zIndex, opacity };
+    angleRef.current = 270 - (index / timelineData.length) * 360;
+    setRotationAngle(angleRef.current);
   };
 
   const activeItem = timelineData.find((item) => item.id === activeNodeId);
@@ -215,7 +247,7 @@ export default function RadialOrbitalTimeline({
     >
       <div
         ref={orbitRef}
-        className="absolute flex h-full w-full items-center justify-center"
+        className="group/orbit absolute flex h-full w-full items-center justify-center"
         style={{ perspective: "1000px" }}
       >
         {/* Centre: custom content as given, or the default pulsing disc */}
@@ -244,13 +276,15 @@ export default function RadialOrbitalTimeline({
         {activeItem ? (
           <svg aria-hidden className="pointer-events-none absolute size-px overflow-visible">
             {activeItem.relatedIds.map((relatedId) => {
-              const from = calculateNodePosition(
+              const from = nodePosition(
                 timelineData.findIndex((item) => item.id === activeItem.id),
-                timelineData.length,
+                total,
+                rotationAngle,
+                radius,
               );
               const toIndex = timelineData.findIndex((item) => item.id === relatedId);
               if (toIndex === -1) return null;
-              const to = calculateNodePosition(toIndex, timelineData.length);
+              const to = nodePosition(toIndex, total, rotationAngle, radius);
               return (
                 <path
                   key={`${activeItem.id}-${relatedId}`}
@@ -266,7 +300,7 @@ export default function RadialOrbitalTimeline({
         ) : null}
 
         {timelineData.map((item, index) => {
-          const position = calculateNodePosition(index, timelineData.length);
+          const position = nodePosition(index, total, rotationAngle, radius);
           const isExpanded = activeNodeId === item.id;
           const isRelated = relatedToActive.has(item.id);
           const Icon = item.icon;
@@ -275,7 +309,10 @@ export default function RadialOrbitalTimeline({
           return (
             <div
               key={item.id}
-              className="absolute transition-all duration-700"
+              ref={(node) => {
+                nodeRefs.current[index] = node;
+              }}
+              className="absolute transition-all duration-700 group-data-[rotating]/orbit:transition-none"
               style={{
                 transform: `translate(${position.x}px, ${position.y}px)`,
                 zIndex: isExpanded ? 200 : position.zIndex,

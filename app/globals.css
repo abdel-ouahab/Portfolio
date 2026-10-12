@@ -166,13 +166,19 @@
 }
 
 .reveal-aurora {
-  background: radial-gradient(
-    circle at 50% 50%,
-    color-mix(in oklch, var(--accent) 16%, transparent) 0%,
-    color-mix(in oklch, var(--status-open) 10%, transparent) 40%,
-    transparent 70%
-  );
+  --aurora-core: color-mix(in oklch, var(--accent) 16%, transparent);
+  --aurora-edge: color-mix(in oklch, var(--status-open) 10%, transparent);
+  background: radial-gradient(circle at 50% 50%, var(--aurora-core) 0%, var(--aurora-edge) 40%, transparent 70%);
   animation: reveal-breathe 8s ease-in-out infinite alternate;
+}
+
+/* Phones skip the aurora's 80px blur (see motion-footer.tsx): a large filter on
+   an always-animating layer is redrawn every frame. Sized to the box's closest
+   side, the gradient fades out before the edges without it. */
+@media (width < 48rem) {
+  .reveal-aurora {
+    background: radial-gradient(closest-side, var(--aurora-core) 0%, var(--aurora-edge) 50%, transparent 100%);
+  }
 }
 
 .reveal-marquee {
@@ -225,7 +231,13 @@
   background: linear-gradient(180deg, var(--foreground) 0%, color-mix(in oklch, var(--foreground) 45%, transparent) 100%);
   -webkit-text-fill-color: transparent;
   background-clip: text;
-  filter: drop-shadow(0 0 20px color-mix(in oklch, var(--foreground) 15%, transparent));
+}
+
+/* The glow is re-rasterised while the heading scrubs in; phones go without. */
+@media (width >= 48rem) {
+  .reveal-heading {
+    filter: drop-shadow(0 0 20px color-mix(in oklch, var(--foreground) 15%, transparent));
+  }
 }
 
 /* ---------- Reveal panel scenes (components/sections/reveal-scenes.tsx) ---------- */

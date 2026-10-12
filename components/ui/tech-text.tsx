@@ -133,11 +133,12 @@ export default function TechText({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const settingsRef = useRef<Settings | null>(null);
   const invalidateRef = useRef(() => {});
+  const layoutKeyRef = useRef("");
   // The DOM text stays visible until the canvas can draw it with the real font
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    settingsRef.current = {
+    const settings: Settings = {
       text,
       color,
       accentColor,
@@ -156,6 +157,12 @@ export default function TechText({
       sweepPattern,
       speed,
     };
+    settingsRef.current = settings;
+    // Invalidating re-lays out every glyph, so it only happens when a prop
+    // changed, not on re-renders such as the one `ready` causes
+    const key = JSON.stringify([settings, className, style]);
+    if (key === layoutKeyRef.current) return;
+    layoutKeyRef.current = key;
     invalidateRef.current();
   });
 
@@ -191,6 +198,7 @@ export default function TechText({
     let pulse = 0;
     let placed = false;
     let dragging = -1;
+    let cursor = "";
     const pointer = { x: 0, y: 0, inside: false };
     const grab = { x: 0, y: 0 };
     const lens = { x: 0, y: 0 };
@@ -623,7 +631,10 @@ export default function TechText({
         else glyph.outline = target;
       });
 
-      if (s.draggable) container.style.cursor = dragging >= 0 ? "grabbing" : focus >= 0 && pointer.inside ? "grab" : "";
+      if (s.draggable) {
+        const next = dragging >= 0 ? "grabbing" : focus >= 0 && pointer.inside ? "grab" : "";
+        if (next !== cursor) container.style.cursor = cursor = next;
+      }
 
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.globalCompositeOperation = "source-over";

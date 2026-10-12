@@ -599,6 +599,8 @@ export default function DottedTrailCursor({
       };
 
       const handlePointerMove = (event: PointerEvent) => {
+        // The listener is on the window; skip the layout read while scrolled away
+        if (!visible) return;
         const rect = container.getBoundingClientRect();
         // Flip Y for gl_FragCoord
         const x = (event.clientX - rect.left) * pixelRatio;
@@ -722,6 +724,14 @@ export default function DottedTrailCursor({
 
       const visibilityObserver = new IntersectionObserver(([entry]) => {
         visible = entry.isIntersecting;
+        if (!visible) {
+          // Pointer moves aren't tracked out of view, so the trail starts fresh
+          // from the next move instead of reappearing where it was left
+          pointerInside = false;
+          targetPresence = 0;
+          presence = 0;
+          seeded = false;
+        }
         wake();
       });
       visibilityObserver.observe(container);
