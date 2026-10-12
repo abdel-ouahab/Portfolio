@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { useEffect, useId, useRef, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
 import { Menu, X } from "lucide-react";
 import { navLinks } from "@/components/layout/nav-links";
 import { CvLink } from "@/components/ui/cv-link";
+import { cn } from "@/lib/utils";
 
 export function MobileNav() {
   const [open, setOpen] = useState(false);
@@ -38,35 +38,33 @@ export function MobileNav() {
         <span className="sr-only">{open ? "Close menu" : "Open menu"}</span>
       </button>
 
-      <AnimatePresence>
-        {open ? (
-          <motion.div
-            id={panelId}
-            initial={{ opacity: 0, y: -8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.18, ease: "easeOut" }}
-            className="absolute inset-x-0 top-16 border-b border-line bg-background px-5 pb-6 pt-2 shadow-[0_24px_40px_-24px_rgb(0_0_0/0.25)] sm:px-8"
-          >
-            <nav aria-label="Mobile">
-              <ul className="divide-y divide-line">
-                {navLinks.map((link) => (
-                  <li key={link.href}>
-                    <Link
-                      href={link.href}
-                      onClick={() => setOpen(false)}
-                      className="block py-3.5 text-lg font-medium transition-colors hover:text-accent"
-                    >
-                      {link.label}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </nav>
-            <CvLink className="mt-5 w-full sm:hidden" />
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
+      {/* Always mounted so CSS can animate it both ways; closed, it is invisible and inert */}
+      <div
+        id={panelId}
+        inert={!open}
+        className={cn(
+          "absolute inset-x-0 top-16 border-b border-line bg-background px-5 pb-6 pt-2 shadow-[0_24px_40px_-24px_rgb(0_0_0/0.25)] sm:px-8",
+          "transition-[opacity,translate,visibility] duration-[180ms] ease-out motion-reduce:transition-none",
+          open ? "visible translate-y-0 opacity-100" : "invisible -translate-y-2 opacity-0",
+        )}
+      >
+        <nav aria-label="Mobile">
+          <ul className="divide-y divide-line">
+            {navLinks.map((link) => (
+              <li key={link.href}>
+                <Link
+                  href={link.href}
+                  onClick={() => setOpen(false)}
+                  className="block py-3.5 text-lg font-medium transition-colors hover:text-accent"
+                >
+                  {link.label}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </nav>
+        <CvLink className="mt-5 w-full sm:hidden" />
+      </div>
     </div>
   );
 }

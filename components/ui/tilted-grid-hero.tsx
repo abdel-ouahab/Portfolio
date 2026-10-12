@@ -142,6 +142,7 @@ export function TiltedGridHero({
   const ref = React.useRef<HTMLDivElement>(null);
   const id = React.useId().replace(/[^a-zA-Z0-9]/g, "");
   const orbit = `tgh-o-${id}`;
+  const shade = `tgh-s-${id}`;
   const tile = `tgh-t-${id}`;
   const bend = (Math.min(85, Math.max(5, curve)) * Math.PI) / 180;
 
@@ -199,17 +200,21 @@ export function TiltedGridHero({
 
   // Beyond `limit` a tile is wholly off-screen, so it is hidden there. The
   // loop's ends, where it wraps, fall inside that stretch, and so do tiles
-  // swinging round behind the camera.
+  // swinging round behind the camera. The hiding is its own opacity
+  // animation on the strips, in step with the tile's: both are compositor
+  // properties, so the band never animates on the main thread. (Opacity on
+  // the tile itself would flatten its 3D strips.)
   const hide = +(((sweep - limit) / (2 * sweep || 1)) * 100).toFixed(4);
   const css =
     `@keyframes ${orbit}{` +
-    `from{transform:${turn(-sweep)}}to{transform:${turn(sweep)}}` +
-    `0%,${hide}%,${100 - hide}%,100%{visibility:hidden}` +
-    `${hide + 0.001}%,${100 - hide - 0.001}%{visibility:visible}}` +
+    `from{transform:${turn(-sweep)}}to{transform:${turn(sweep)}}}` +
+    `@keyframes ${shade}{` +
+    `0%,${hide}%,${100 - hide}%,100%{opacity:0}` +
+    `${hide + 0.001}%,${100 - hide - 0.001}%{opacity:1}}` +
     // Pausing rather than removing the motion keeps the band whole: every
     // tile is already placed by its negative delay, so it freezes as a
     // finished still.
-    `@media(prefers-reduced-motion:reduce){.${tile}{animation-play-state:paused}}`;
+    `@media(prefers-reduced-motion:reduce){.${tile},.${tile}>div{animation-play-state:paused}}`;
 
   const share = aspectRatio / SLICES;
   const duration = columns * speed;
@@ -262,6 +267,8 @@ export function TiltedGridHero({
                 animation: `${orbit} ${duration}s linear ${-t * speed}s infinite`,
               }}
               onAnimationIteration={(e) => {
+                // The strips' opacity loops bubble up here too; only the orbit counts.
+                if (e.animationName !== orbit) return;
                 // elapsedTime counts whole loops, missed events included.
                 const lap = Math.round(e.elapsedTime / duration);
                 setShown((prev) => {
@@ -293,6 +300,7 @@ export function TiltedGridHero({
                     transform: turn(
                       (aspectRatio / 2 - (k + 0.5) * share) * unit,
                     ),
+                    animation: `${shade} ${duration}s linear ${-t * speed}s infinite`,
                   }}
                 >
                   {img ? (

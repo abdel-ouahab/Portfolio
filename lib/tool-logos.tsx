@@ -18,7 +18,10 @@ import {
 /*
  * Logos for the tools in data/skills.ts. Brand marks come from Simple Icons
  * (CC0); ideas without a brand get a Lucide icon. Imported only from Server
- * Components, so the icon set never reaches the client bundle.
+ * Components, so the icon set never reaches the client bundle. The brand marks
+ * themselves live in one cached sprite (app/skill-icons.svg), so the page only
+ * carries a short <use> reference per logo instead of every path, twice (in
+ * the HTML and again in the payload React hydrates from).
  */
 
 /** Skill name → Simple Icons slug. */
@@ -76,6 +79,21 @@ const iconsBySlug = new Map(
     .map((icon) => [icon.slug, icon]),
 );
 
+const usedIcons = [...new Set(Object.values(brandSlugs))]
+  .map((slug) => iconsBySlug.get(slug))
+  .filter((icon): icon is SimpleIcon => icon !== undefined);
+
+/** Every brand mark the skills use, as <symbol>s keyed by slug. */
+export const brandSprite =
+  `<svg xmlns="http://www.w3.org/2000/svg">` +
+  usedIcons.map((icon) => `<symbol id="${icon.slug}" viewBox="0 0 24 24"><path d="${icon.path}"/></symbol>`).join("") +
+  `</svg>`;
+
+// Changes whenever the sprite does, so a cached copy is never stale
+let hash = 0;
+for (let i = 0; i < brandSprite.length; i++) hash = (Math.imul(hash, 31) + brandSprite.charCodeAt(i)) | 0;
+const spriteUrl = `/skill-icons.svg?v=${(hash >>> 0).toString(36)}`;
+
 /** Relative luminance of a hex color, 0 (black) to 1 (white). */
 function luminance(hex: string) {
   const [r, g, b] = [0, 2, 4].map((i) => {
@@ -97,7 +115,7 @@ export function toolLogo(name: string): ToolLogo {
     return {
       logo: (
         <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden className="size-full">
-          <path d={icon.path} />
+          <use href={`${spriteUrl}#${icon.slug}`} />
         </svg>
       ),
       brand: luminance(icon.hex) > 0.05 ? `#${icon.hex}` : undefined,

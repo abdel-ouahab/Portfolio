@@ -334,54 +334,65 @@ export function createArtJob(width: number, height: number, recipe: ArtRecipe, s
     }
   }
 
-  const colorize = () => {
-    // percentiles from a sample, not a full sort: cheap and just as stable
+  // percentiles from a sample, not a full sort: cheap and just as stable
+  let lo = 0
+  let k = 1
+  const levels = () => {
     const sample: number[] = []
     const stride = Math.max(1, Math.floor(F.length / 4096))
     for (let i = 0; i < F.length; i += stride) sample.push(F[i])
     sample.sort((a, b) => a - b)
-    const lo = sample[Math.floor(sample.length * 0.02)]
+    lo = sample[Math.floor(sample.length * 0.02)]
     const hi = sample[Math.floor(sample.length * 0.98)]
-    const k = 1 / (hi - lo || 1)
-    const lx = -0.55
-    const ly = -0.65
-    const lz = 0.52
+    k = 1 / (hi - lo || 1)
+  }
+
+  const lx = -0.55
+  const ly = -0.65
+  const lz = 0.52
+  const colorize = (y: number) => {
     const slope = k * m * 0.012
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const i = y * w + x
-        let t = (F[i] - lo) * k
-        t = t < 0 ? 0 : t > 1 ? 1 : t
-        let j = 1
-        while (j < stops.length - 1 && stops[j].t < t) j++
-        const a = stops[j - 1]
-        const b = stops[j]
-        let f = (t - a.t) / (b.t - a.t || 1)
-        f = f < 0 ? 0 : f > 1 ? 1 : f
-        f = f * f * (3 - 2 * f)
-        const gx = (F[x < w - 1 ? i + 1 : i] - F[x > 0 ? i - 1 : i]) * slope
-        const gy = (F[y < h - 1 ? i + w : i] - F[y > 0 ? i - w : i]) * slope
-        const nd = (-gx * lx - gy * ly + lz) / Math.sqrt(gx * gx + gy * gy + 1)
-        const spec = Math.pow(nd > 0 ? nd : 0, 24) * gloss * 255
-        const silk = 1 + 0.035 * Math.sin(t * 150 + Q[i] * 24)
-        const vein = veins * Math.max(0, 1 - Math.abs(Q[i] - 0.42) * 14) * 0.6
-        const lit = (0.82 + 0.28 * nd) * silk * (1 - vein)
-        pixels[i * 4] = (a.c[0] + (b.c[0] - a.c[0]) * f) * lit + spec
-        pixels[i * 4 + 1] = (a.c[1] + (b.c[1] - a.c[1]) * f) * lit + spec
-        pixels[i * 4 + 2] = (a.c[2] + (b.c[2] - a.c[2]) * f) * lit + spec
-        pixels[i * 4 + 3] = 255
-      }
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x
+      let t = (F[i] - lo) * k
+      t = t < 0 ? 0 : t > 1 ? 1 : t
+      let j = 1
+      while (j < stops.length - 1 && stops[j].t < t) j++
+      const a = stops[j - 1]
+      const b = stops[j]
+      let f = (t - a.t) / (b.t - a.t || 1)
+      f = f < 0 ? 0 : f > 1 ? 1 : f
+      f = f * f * (3 - 2 * f)
+      const gx = (F[x < w - 1 ? i + 1 : i] - F[x > 0 ? i - 1 : i]) * slope
+      const gy = (F[y < h - 1 ? i + w : i] - F[y > 0 ? i - w : i]) * slope
+      const nd = (-gx * lx - gy * ly + lz) / Math.sqrt(gx * gx + gy * gy + 1)
+      const spec = Math.pow(nd > 0 ? nd : 0, 24) * gloss * 255
+      const silk = 1 + 0.035 * Math.sin(t * 150 + Q[i] * 24)
+      const vein = veins * Math.max(0, 1 - Math.abs(Q[i] - 0.42) * 14) * 0.6
+      const lit = (0.82 + 0.28 * nd) * silk * (1 - vein)
+      pixels[i * 4] = (a.c[0] + (b.c[0] - a.c[0]) * f) * lit + spec
+      pixels[i * 4 + 1] = (a.c[1] + (b.c[1] - a.c[1]) * f) * lit + spec
+      pixels[i * 4 + 2] = (a.c[2] + (b.c[2] - a.c[2]) * f) * lit + spec
+      pixels[i * 4 + 3] = 255
     }
   }
 
+  // Field rows first, then one upsample, then the colour pass row by row, so
+  // no single step holds the main thread for long.
+  let lit = 0
   const step = (rows: number): boolean => {
-    if (row >= gh) return true
-    const end = Math.min(gh, row + Math.max(1, rows))
-    while (row < end) field(row++)
-    if (row < gh) return false
-    upsample()
-    colorize()
-    return true
+    const n = Math.max(1, rows)
+    if (row < gh) {
+      const end = Math.min(gh, row + n)
+      while (row < end) field(row++)
+      if (row < gh) return false
+      upsample()
+      levels()
+      return false
+    }
+    const end = Math.min(h, lit + n * 4)
+    while (lit < end) colorize(lit++)
+    return lit >= h
   }
 
   return { width: w, height: h, pixels, step }
@@ -468,8 +479,30 @@ function ArtCanvas({
   const paintId = key + "|" + seed + "|" + pw + "|" + ph
   const [paintedId, setPaintedId] = React.useState<string | null>(null)
   const ready = paintedId === paintId
+  // The art is costly to paint, so nothing is queued until the canvas is within
+  // a screen of the viewport: folders further down never slow the page's load.
+  const [near, setNear] = React.useState(false)
 
   React.useEffect(() => {
+    const c = ref.current
+    if (!c || typeof IntersectionObserver === "undefined") {
+      setNear(true)
+      return
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((e) => e.isIntersecting)) return
+        io.disconnect()
+        setNear(true)
+      },
+      { rootMargin: "100% 0px" },
+    )
+    io.observe(c)
+    return () => io.disconnect()
+  }, [])
+
+  React.useEffect(() => {
+    if (!near) return
     let live = true
     paint(JSON.parse(key) as ArtRecipe, seed, pw, ph, priority).then((src) => {
       const c = ref.current
@@ -482,7 +515,7 @@ function ArtCanvas({
     return () => {
       live = false
     }
-  }, [key, seed, pw, ph, priority, paintId])
+  }, [near, key, seed, pw, ph, priority, paintId])
 
   return (
     <canvas
@@ -720,7 +753,8 @@ export default function GlassFolder({
       data-place={labelPlacement}
       style={{ width, height: (H + HEADROOM) * k, ...style }}
     >
-      <style>{GF_CSS}</style>
+      {/* Hoisted to <head> and deduplicated by React, however many folders render */}
+      <style href="glass-folder-cards" precedence="medium">{GF_CSS}</style>
       <div className="gf-stage" style={{ transform: "translateY(" + HEADROOM * k + "px) scale(" + k + ")" }}>
         <div className="gf-tilt">
           <div className="gf-shadow" aria-hidden="true" />

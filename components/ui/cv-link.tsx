@@ -12,7 +12,7 @@ export function CvLink({ className, variant = "outline", size }: ButtonVariantPr
 
   if (profile.cv.available) {
     return (
-      <a href={profile.cv.href} download className={classes}>
+      <a href={profile.cv.href} download={`${profile.name.replace(/ /g, "-")}-CV.pdf`} className={classes}>
         <Download aria-hidden />
         Download CV
       </a>

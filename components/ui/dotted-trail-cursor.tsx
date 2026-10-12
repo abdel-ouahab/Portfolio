@@ -90,6 +90,9 @@ const THEME_BACKGROUND = { className: "text-background", fallback: "#ffffff" };
 const THEME_DOT = { className: "text-foreground/20", fallback: "#d1d1d1" };
 const THEME_ACTIVE_DOT = { className: "text-background", fallback: "#ffffff" };
 
+// Devices without a hovering pointer (phones, tablets) have no cursor to trail
+const NO_HOVER = "(hover: none)";
+
 // Inherited by the colour probe, so an unresolved token is detectable
 const PROBE_SENTINEL = "rgb(1, 2, 3)";
 
@@ -120,6 +123,7 @@ uniform float uRimOuter;
 uniform float uEdgeDesaturate;
 uniform float uEdgeDesaturateSpan;
 uniform float uTailTilt;
+uniform bool uTransparent;
 
 out vec4 outColor;
 
@@ -200,6 +204,12 @@ void main() {
 
 	vec3 dotColor = mix(uDotColor, uActiveDotColor, ink);
 
+	// See-through page: only the trail and dots are drawn (premultiplied alpha)
+	if (uTransparent) {
+		outColor = mix(vec4(tint * ink, ink), vec4(dotColor, 1.0), dot);
+		return;
+	}
+
 	color = mix(color, dotColor, dot);
 
 	outColor = vec4(color, 1.0);
@@ -258,6 +268,8 @@ export interface DottedTrailCursorProps {
   colorB?: string;
   /** Page color behind the grid. Defaults to the theme's background token. */
   backgroundColor?: string;
+  /** Skip painting the page color so whatever is behind the component shows through. */
+  transparent?: boolean;
   /** Dot color at rest. Defaults to the theme's foreground at 20% over the background. */
   dotColor?: string;
   /** Dot color under the trail. Defaults to the theme's background token, so dots read as holes. */
@@ -299,6 +311,7 @@ export default function DottedTrailCursor({
   colorA = COLOR_A,
   colorB = COLOR_B,
   backgroundColor,
+  transparent = false,
   dotColor,
   activeDotColor,
   dotSpacing = DOT_SPACING,
@@ -345,6 +358,7 @@ export default function DottedTrailCursor({
     edgeDesaturate,
     edgeDesaturateSpan,
     tailTilt,
+    transparent,
   });
   const reducedMotion = usePrefersReducedMotion();
 
@@ -371,6 +385,7 @@ export default function DottedTrailCursor({
       edgeDesaturate,
       edgeDesaturateSpan,
       tailTilt,
+      transparent,
     };
   });
 
@@ -455,259 +470,296 @@ export default function DottedTrailCursor({
   }, []);
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    const container = containerRef.current;
-    if (!canvas || !container) return;
+    // Shader compile and GL setup wait for an idle moment: the grid is
+    // decorative, and this keeps it out of the page's hydration work
+    const setup = (): void | (() => void) => {
+      const canvas = canvasRef.current;
+      const container = containerRef.current;
+      if (!canvas || !container) return;
 
-    const gl = canvas.getContext("webgl2", { antialias: false, alpha: false });
-    if (!gl) return;
+      // Alpha so `transparent` can toggle live; opaque mode writes alpha 1 anyway
+      const gl = canvas.getContext("webgl2", { antialias: false, alpha: true });
+      if (!gl) return;
 
-    const vertexShader = compile(gl, gl.VERTEX_SHADER, VERTEX_SHADER);
-    const fragmentShader = compile(gl, gl.FRAGMENT_SHADER, FRAGMENT_SHADER);
-    if (!vertexShader || !fragmentShader) return;
+      const vertexShader = compile(gl, gl.VERTEX_SHADER, VERTEX_SHADER);
+      const fragmentShader = compile(gl, gl.FRAGMENT_SHADER, FRAGMENT_SHADER);
+      if (!vertexShader || !fragmentShader) return;
 
-    const program = gl.createProgram();
-    if (!program) return;
+      const program = gl.createProgram();
+      if (!program) return;
 
-    gl.attachShader(program, vertexShader);
-    gl.attachShader(program, fragmentShader);
-    gl.linkProgram(program);
+      gl.attachShader(program, vertexShader);
+      gl.attachShader(program, fragmentShader);
+      gl.linkProgram(program);
 
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-      gl.deleteProgram(program);
-      return;
-    }
-
-    gl.useProgram(program);
-
-    const buffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-    gl.bufferData(
-      gl.ARRAY_BUFFER,
-      new Float32Array([-1, -1, 3, -1, -1, 3]),
-      gl.STATIC_DRAW
-    );
-
-    const quadLocation = gl.getAttribLocation(program, "aQuad");
-    gl.enableVertexAttribArray(quadLocation);
-    gl.vertexAttribPointer(quadLocation, 2, gl.FLOAT, false, 0, 0);
-
-    const uniforms = {
-      resolution: gl.getUniformLocation(program, "uResolution"),
-      trail: gl.getUniformLocation(program, "uTrail"),
-      presence: gl.getUniformLocation(program, "uPresence"),
-      colorA: gl.getUniformLocation(program, "uColorA"),
-      colorB: gl.getUniformLocation(program, "uColorB"),
-      background: gl.getUniformLocation(program, "uBackground"),
-      dotColor: gl.getUniformLocation(program, "uDotColor"),
-      activeDotColor: gl.getUniformLocation(program, "uActiveDotColor"),
-      spacing: gl.getUniformLocation(program, "uSpacing"),
-      dotRadius: gl.getUniformLocation(program, "uDotRadius"),
-      glowRadius: gl.getUniformLocation(program, "uGlowRadius"),
-      headRadius: gl.getUniformLocation(program, "uHeadRadius"),
-      trailNodes: gl.getUniformLocation(program, "uTrailNodes"),
-      rimInner: gl.getUniformLocation(program, "uRimInner"),
-      rimOuter: gl.getUniformLocation(program, "uRimOuter"),
-      edgeDesaturate: gl.getUniformLocation(program, "uEdgeDesaturate"),
-      edgeDesaturateSpan: gl.getUniformLocation(program, "uEdgeDesaturateSpan"),
-      tailTilt: gl.getUniformLocation(program, "uTailTilt"),
-    };
-
-    const trail = new Float32Array(TRAIL_LENGTH * 2);
-    const pointer = { x: 0, y: 0 };
-    const eased = { x: 0, y: 0 };
-    let presence = 0;
-    let targetPresence = 0;
-    let seeded = false;
-    let pixelRatio = 1;
-    let frame = 0;
-    let lastMoved = 0;
-    let pointerInside = false;
-    let visible = true;
-
-    // Clamped to the shader array size
-    const activeNodes = () =>
-      Math.max(
-        2,
-        Math.min(Math.round(settingsRef.current.trailLength), TRAIL_LENGTH)
-      );
-
-    // Live props each frame
-    const pushUniforms = () => {
-      const settings = settingsRef.current;
-      if (!colorsRef.current) resolveColorsRef.current();
-      const colors = colorsRef.current;
-
-      if (colors) {
-        gl.uniform3fv(uniforms.colorA, colors.colorA);
-        gl.uniform3fv(uniforms.colorB, colors.colorB);
-        gl.uniform3fv(uniforms.background, colors.background);
-        gl.uniform3fv(uniforms.dotColor, colors.dot);
-        gl.uniform3fv(uniforms.activeDotColor, colors.activeDot);
-      }
-      gl.uniform1f(uniforms.spacing, settings.dotSpacing * pixelRatio);
-      gl.uniform1f(uniforms.dotRadius, settings.dotRadius * pixelRatio);
-      gl.uniform1f(uniforms.glowRadius, settings.glowRadius * pixelRatio);
-      gl.uniform1f(uniforms.headRadius, settings.headRadius * pixelRatio);
-      gl.uniform1i(uniforms.trailNodes, activeNodes());
-      gl.uniform1f(uniforms.rimInner, settings.rimInner);
-      gl.uniform1f(uniforms.rimOuter, settings.rimOuter);
-      gl.uniform1f(uniforms.edgeDesaturate, settings.edgeDesaturate);
-      gl.uniform1f(uniforms.edgeDesaturateSpan, settings.edgeDesaturateSpan);
-      gl.uniform1f(uniforms.tailTilt, settings.tailTilt);
-    };
-
-    const resize = () => {
-      pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
-      const { width, height } = container.getBoundingClientRect();
-
-      canvas.width = Math.max(1, Math.round(width * pixelRatio));
-      canvas.height = Math.max(1, Math.round(height * pixelRatio));
-      gl.viewport(0, 0, canvas.width, canvas.height);
-      gl.uniform2f(uniforms.resolution, canvas.width, canvas.height);
-    };
-
-    const seed = (x: number, y: number) => {
-      for (let i = 0; i < TRAIL_LENGTH; i++) {
-        trail[i * 2] = x;
-        trail[i * 2 + 1] = y;
-      }
-      eased.x = x;
-      eased.y = y;
-      seeded = true;
-    };
-
-    const handlePointerMove = (event: PointerEvent) => {
-      const rect = container.getBoundingClientRect();
-      // Flip Y for gl_FragCoord
-      const x = (event.clientX - rect.left) * pixelRatio;
-      const y = (rect.bottom - event.clientY) * pixelRatio;
-
-      // Only real movement counts
-      if (x !== pointer.x || y !== pointer.y) lastMoved = performance.now();
-
-      pointer.x = x;
-      pointer.y = y;
-      pointerInside = true;
-      targetPresence = 1;
-
-      if (!seeded) seed(pointer.x, pointer.y);
-    };
-
-    const handlePointerLeave = () => {
-      pointerInside = false;
-      targetPresence = 0;
-    };
-
-    // Static dot field, one draw
-    const drawStill = () => {
-      gl.uniform2fv(uniforms.trail, trail);
-      gl.uniform1f(uniforms.presence, 0);
-      pushUniforms();
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
-    };
-
-    const render = () => {
-      // Paused while scrolled out of view
-      if (!visible) {
-        frame = 0;
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        gl.deleteProgram(program);
         return;
       }
-      frame = requestAnimationFrame(render);
 
-      const settings = settingsRef.current;
-      const followEase = Math.min(Math.max(settings.followSpeed, 0.02), 1);
+      gl.useProgram(program);
 
-      // Ramped fade once still
-      let idleFadeAmount = 0.0;
-      if (settings.fadeOnIdle && pointerInside && lastMoved > 0) {
-        const still =
-          performance.now() - lastMoved - Math.max(0, settings.idleDelay);
-        const span = Math.max(1, settings.idleFade);
-        const x = Math.min(Math.max(still / span, 0), 1);
-        // Smootherstep, soft both ends
-        idleFadeAmount = x * x * x * (x * (x * 6 - 15) + 10);
-      }
+      const buffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      gl.bufferData(
+        gl.ARRAY_BUFFER,
+        new Float32Array([-1, -1, 3, -1, -1, 3]),
+        gl.STATIC_DRAW
+      );
 
-      presence += (targetPresence - presence) * 0.08;
-      presence = Math.min(presence, 1 - idleFadeAmount);
-      eased.x += (pointer.x - eased.x) * followEase;
-      eased.y += (pointer.y - eased.y) * followEase;
+      const quadLocation = gl.getAttribLocation(program, "aQuad");
+      gl.enableVertexAttribArray(quadLocation);
+      gl.vertexAttribPointer(quadLocation, 2, gl.FLOAT, false, 0, 0);
 
-      trail[0] = eased.x;
-      trail[1] = eased.y;
+      const uniforms = {
+        resolution: gl.getUniformLocation(program, "uResolution"),
+        trail: gl.getUniformLocation(program, "uTrail"),
+        presence: gl.getUniformLocation(program, "uPresence"),
+        colorA: gl.getUniformLocation(program, "uColorA"),
+        colorB: gl.getUniformLocation(program, "uColorB"),
+        background: gl.getUniformLocation(program, "uBackground"),
+        dotColor: gl.getUniformLocation(program, "uDotColor"),
+        activeDotColor: gl.getUniformLocation(program, "uActiveDotColor"),
+        spacing: gl.getUniformLocation(program, "uSpacing"),
+        dotRadius: gl.getUniformLocation(program, "uDotRadius"),
+        glowRadius: gl.getUniformLocation(program, "uGlowRadius"),
+        headRadius: gl.getUniformLocation(program, "uHeadRadius"),
+        trailNodes: gl.getUniformLocation(program, "uTrailNodes"),
+        rimInner: gl.getUniformLocation(program, "uRimInner"),
+        rimOuter: gl.getUniformLocation(program, "uRimOuter"),
+        edgeDesaturate: gl.getUniformLocation(program, "uEdgeDesaturate"),
+        edgeDesaturateSpan: gl.getUniformLocation(program, "uEdgeDesaturateSpan"),
+        tailTilt: gl.getUniformLocation(program, "uTailTilt"),
+        transparent: gl.getUniformLocation(program, "uTransparent"),
+      };
 
-      const nodes = activeNodes();
-      for (let i = 1; i < nodes; i++) {
-        const index = i * 2;
-        const previous = (i - 1) * 2;
-        trail[index] += (trail[previous] - trail[index]) * TRAIL_EASE;
-        trail[index + 1] +=
-          (trail[previous + 1] - trail[index + 1]) * TRAIL_EASE;
-      }
+      const trail = new Float32Array(TRAIL_LENGTH * 2);
+      const pointer = { x: 0, y: 0 };
+      const eased = { x: 0, y: 0 };
+      let presence = 0;
+      let targetPresence = 0;
+      let seeded = false;
+      let pixelRatio = 1;
+      let frame = 0;
+      let lastMoved = 0;
+      let pointerInside = false;
+      let visible = true;
 
-      // Park dormant nodes on the tail tip
-      const tipX = trail[(nodes - 1) * 2];
-      const tipY = trail[(nodes - 1) * 2 + 1];
-      for (let i = nodes; i < TRAIL_LENGTH; i++) {
-        trail[i * 2] = tipX;
-        trail[i * 2 + 1] = tipY;
-      }
+      // Clamped to the shader array size
+      const activeNodes = () =>
+        Math.max(
+          2,
+          Math.min(Math.round(settingsRef.current.trailLength), TRAIL_LENGTH)
+        );
 
-      gl.uniform2fv(uniforms.trail, trail);
-      gl.uniform1f(uniforms.presence, presence);
-      pushUniforms();
+      // Live props each frame
+      const pushUniforms = () => {
+        const settings = settingsRef.current;
+        if (!colorsRef.current) resolveColorsRef.current();
+        const colors = colorsRef.current;
 
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
-    };
+        if (colors) {
+          gl.uniform3fv(uniforms.colorA, colors.colorA);
+          gl.uniform3fv(uniforms.colorB, colors.colorB);
+          gl.uniform3fv(uniforms.background, colors.background);
+          gl.uniform3fv(uniforms.dotColor, colors.dot);
+          gl.uniform3fv(uniforms.activeDotColor, colors.activeDot);
+        }
+        gl.uniform1f(uniforms.spacing, settings.dotSpacing * pixelRatio);
+        gl.uniform1f(uniforms.dotRadius, settings.dotRadius * pixelRatio);
+        gl.uniform1f(uniforms.glowRadius, settings.glowRadius * pixelRatio);
+        gl.uniform1f(uniforms.headRadius, settings.headRadius * pixelRatio);
+        gl.uniform1i(uniforms.trailNodes, activeNodes());
+        gl.uniform1f(uniforms.rimInner, settings.rimInner);
+        gl.uniform1f(uniforms.rimOuter, settings.rimOuter);
+        gl.uniform1f(uniforms.edgeDesaturate, settings.edgeDesaturate);
+        gl.uniform1f(uniforms.edgeDesaturateSpan, settings.edgeDesaturateSpan);
+        gl.uniform1f(uniforms.tailTilt, settings.tailTilt);
+        gl.uniform1i(uniforms.transparent, settings.transparent ? 1 : 0);
+      };
 
-    const cleanupGl = () => {
-      gl.deleteProgram(program);
-      gl.deleteShader(vertexShader);
-      gl.deleteShader(fragmentShader);
-      gl.deleteBuffer(buffer);
-    };
+      const resize = () => {
+        pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+        const { width, height } = container.getBoundingClientRect();
 
-    if (reducedMotion) {
-      const observer = new ResizeObserver(() => {
+        canvas.width = Math.max(1, Math.round(width * pixelRatio));
+        canvas.height = Math.max(1, Math.round(height * pixelRatio));
+        gl.viewport(0, 0, canvas.width, canvas.height);
+        gl.uniform2f(uniforms.resolution, canvas.width, canvas.height);
+      };
+
+      const seed = (x: number, y: number) => {
+        for (let i = 0; i < TRAIL_LENGTH; i++) {
+          trail[i * 2] = x;
+          trail[i * 2 + 1] = y;
+        }
+        eased.x = x;
+        eased.y = y;
+        seeded = true;
+      };
+
+      const handlePointerMove = (event: PointerEvent) => {
+        const rect = container.getBoundingClientRect();
+        // Flip Y for gl_FragCoord
+        const x = (event.clientX - rect.left) * pixelRatio;
+        const y = (rect.bottom - event.clientY) * pixelRatio;
+
+        // Only real movement counts
+        if (x !== pointer.x || y !== pointer.y) lastMoved = performance.now();
+
+        pointer.x = x;
+        pointer.y = y;
+        pointerInside = true;
+        targetPresence = 1;
+
+        if (!seeded) seed(pointer.x, pointer.y);
+        wake();
+      };
+
+      const handlePointerLeave = () => {
+        pointerInside = false;
+        targetPresence = 0;
+        wake();
+      };
+
+      // Static dot field, one draw
+      const drawStill = () => {
+        gl.uniform2fv(uniforms.trail, trail);
+        gl.uniform1f(uniforms.presence, 0);
+        pushUniforms();
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      };
+
+      const render = () => {
+        // Paused while scrolled out of view
+        if (!visible) {
+          frame = 0;
+          return;
+        }
+
+        const settings = settingsRef.current;
+        const followEase = Math.min(Math.max(settings.followSpeed, 0.02), 1);
+
+        // Ramped fade once still
+        let idleFadeAmount = 0.0;
+        if (settings.fadeOnIdle && pointerInside && lastMoved > 0) {
+          const still =
+            performance.now() - lastMoved - Math.max(0, settings.idleDelay);
+          const span = Math.max(1, settings.idleFade);
+          const x = Math.min(Math.max(still / span, 0), 1);
+          // Smootherstep, soft both ends
+          idleFadeAmount = x * x * x * (x * (x * 6 - 15) + 10);
+        }
+
+        presence += (targetPresence - presence) * 0.08;
+        presence = Math.min(presence, 1 - idleFadeAmount);
+        eased.x += (pointer.x - eased.x) * followEase;
+        eased.y += (pointer.y - eased.y) * followEase;
+
+        trail[0] = eased.x;
+        trail[1] = eased.y;
+
+        const nodes = activeNodes();
+        for (let i = 1; i < nodes; i++) {
+          const index = i * 2;
+          const previous = (i - 1) * 2;
+          trail[index] += (trail[previous] - trail[index]) * TRAIL_EASE;
+          trail[index + 1] +=
+            (trail[previous + 1] - trail[index + 1]) * TRAIL_EASE;
+        }
+
+        // Park dormant nodes on the tail tip
+        const tipX = trail[(nodes - 1) * 2];
+        const tipY = trail[(nodes - 1) * 2 + 1];
+        for (let i = nodes; i < TRAIL_LENGTH; i++) {
+          trail[i * 2] = tipX;
+          trail[i * 2 + 1] = tipY;
+        }
+
+        gl.uniform2fv(uniforms.trail, trail);
+        gl.uniform1f(uniforms.presence, presence);
+        pushUniforms();
+
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+        // Once the trail has faded out the frame is just the still dot field,
+        // so stop until the pointer moves again
+        const faded = targetPresence === 0 || idleFadeAmount >= 1;
+        frame = faded && presence < 0.001 ? 0 : requestAnimationFrame(render);
+      };
+
+      const wake = () => {
+        if (visible && frame === 0) frame = requestAnimationFrame(render);
+      };
+
+      const cleanupGl = () => {
+        gl.deleteProgram(program);
+        gl.deleteShader(vertexShader);
+        gl.deleteShader(fragmentShader);
+        gl.deleteBuffer(buffer);
+      };
+
+      if (reducedMotion) {
+        const observer = new ResizeObserver(() => {
+          resize();
+          drawStill();
+        });
+        observer.observe(container);
         resize();
         drawStill();
-      });
-      observer.observe(container);
+        requestDrawRef.current = drawStill;
+
+        return () => {
+          requestDrawRef.current = () => {};
+          observer.disconnect();
+          cleanupGl();
+        };
+      }
+
+      const resizeObserver = new ResizeObserver(resize);
+      resizeObserver.observe(container);
       resize();
-      drawStill();
-      requestDrawRef.current = drawStill;
+
+      const visibilityObserver = new IntersectionObserver(([entry]) => {
+        visible = entry.isIntersecting;
+        wake();
+      });
+      visibilityObserver.observe(container);
+
+      window.addEventListener("pointermove", handlePointerMove, {
+        passive: true,
+      });
+      container.addEventListener("pointerleave", handlePointerLeave);
+      frame = requestAnimationFrame(render);
 
       return () => {
-        requestDrawRef.current = () => {};
-        observer.disconnect();
+        cancelAnimationFrame(frame);
+        resizeObserver.disconnect();
+        visibilityObserver.disconnect();
+        window.removeEventListener("pointermove", handlePointerMove);
+        container.removeEventListener("pointerleave", handlePointerLeave);
         cleanupGl();
       };
-    }
+    };
 
-    const resizeObserver = new ResizeObserver(resize);
-    resizeObserver.observe(container);
-    resize();
+    // Touch screens get the still dot field from CSS instead (see the render)
+    if (window.matchMedia(NO_HOVER).matches) return;
 
-    const visibilityObserver = new IntersectionObserver(([entry]) => {
-      visible = entry.isIntersecting;
-      if (visible && frame === 0) frame = requestAnimationFrame(render);
-    });
-    visibilityObserver.observe(container);
-
-    window.addEventListener("pointermove", handlePointerMove, {
-      passive: true,
-    });
-    container.addEventListener("pointerleave", handlePointerLeave);
-    frame = requestAnimationFrame(render);
+    let cleanup: void | (() => void);
+    const start = () => {
+      idle = 0;
+      cleanup = setup();
+    };
+    let idle = window.requestIdleCallback
+      ? window.requestIdleCallback(start, { timeout: 1500 })
+      : window.setTimeout(start, 200);
 
     return () => {
-      cancelAnimationFrame(frame);
-      resizeObserver.disconnect();
-      visibilityObserver.disconnect();
-      window.removeEventListener("pointermove", handlePointerMove);
-      container.removeEventListener("pointerleave", handlePointerLeave);
-      cleanupGl();
+      if (idle) {
+        if (window.cancelIdleCallback) window.cancelIdleCallback(idle);
+        else window.clearTimeout(idle);
+      }
+      cleanup?.();
     };
   }, [reducedMotion]);
 
@@ -719,14 +771,26 @@ export default function DottedTrailCursor({
       // cn() (tailwind-merge) so a caller's height overrides the h-screen default
       className={cn(
         "relative h-screen w-full overflow-hidden",
-        !backgroundColor && "bg-background",
+        !backgroundColor && !transparent && "bg-background",
         className
       )}
     >
       <canvas
         ref={canvasRef}
         aria-hidden="true"
-        className="absolute inset-0 h-full w-full"
+        className="absolute inset-0 h-full w-full [@media(hover:none)]:hidden"
+      />
+      {/* With no cursor to trail, the grid never moves: drawn in CSS, it costs
+          no WebGL context or shader compile on phones */}
+      <div
+        aria-hidden="true"
+        className="absolute inset-0 hidden [@media(hover:none)]:block"
+        style={{
+          backgroundImage: `radial-gradient(circle, ${
+            dotColor ?? "color-mix(in oklch, var(--foreground) 20%, transparent)"
+          } ${dotRadius}px, transparent ${dotRadius + 0.9}px)`,
+          backgroundSize: `${dotSpacing}px ${dotSpacing}px`,
+        }}
       />
       <span aria-hidden="true" hidden style={{ color: PROBE_SENTINEL }}>
         <span ref={probeRef} />

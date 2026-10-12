@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { profile } from "@/data/profile";
 import { siteUrl } from "@/lib/utils";
 import { ThemeScript } from "@/components/theme/theme-script";
+import { RadialBackground } from "@/components/ui/light-theme-tailwind-css-background-snippet";
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
 import "./globals.css";
@@ -73,6 +74,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <ThemeScript />
       </head>
       <body id="top" className="flex min-h-dvh flex-col">
+        {/* Light theme only; pinned to the viewport so it stays put while scrolling */}
+        <RadialBackground className="fixed dark:hidden" />
         <SiteHeader />
         <main id="main" className="flex-1">
           {children}

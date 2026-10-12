@@ -20,6 +20,7 @@ export function Hero() {
       {/* Interactive dotted grid behind the whole hero; trail colors are theme tokens in globals.css */}
       <DottedTrailCursor
         className="h-auto"
+        transparent
         colorA="var(--trail-a)"
         colorB="var(--trail-b)"
         headRadius={70}

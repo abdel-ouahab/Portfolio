@@ -2,16 +2,24 @@ import type { Project, SkillGroup } from "@/types";
 import type { TiltedGridImage } from "@/components/ui/tilted-grid-hero";
 
 /**
- * Builds the hero band's tiles as inline SVG images, drawn from the site's own
- * data: each project as a card with its core entities, alternating with skill
+ * Builds the hero band's tiles as SVG images, drawn from the site's own data:
+ * each project as a card with its core entities, alternating with skill
  * groups. Images inside <img> can't read CSS variables, so each theme gets
- * its own palette.
+ * its own palette. The SVGs are served by app/hero-tiles/[theme]/[index], so
+ * the page only carries short URLs instead of repeating each image inline.
  */
 
 const W = 640;
 const H = 360;
 const SANS = "Segoe UI, system-ui, -apple-system, Helvetica, Arial, sans-serif";
 const MONO = "ui-monospace, SFMono-Regular, Consolas, Menlo, monospace";
+
+type HeroTheme = "light" | "dark";
+
+interface Tile {
+  svg: string;
+  alt: string;
+}
 
 interface Palette {
   bg: string;
@@ -24,7 +32,7 @@ interface Palette {
   box: string;
 }
 
-const palettes: Record<"light" | "dark", Palette> = {
+const palettes: Record<HeroTheme, Palette> = {
   light: {
     bg: "#ffffff",
     header: "#e9ebe6",
@@ -51,10 +59,6 @@ function escapeXml(value: string) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function toDataUri(svg: string) {
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-}
-
 function frame(p: Palette, label: string, title: string, body: string) {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">
 <rect width="${W}" height="${H}" fill="${p.bg}"/>
@@ -67,7 +71,7 @@ ${body}
 </svg>`;
 }
 
-function projectTile(project: Project, p: Palette): TiltedGridImage {
+function projectTile(project: Project, p: Palette): Tile {
   const entities = project.entities.slice(0, 6);
   const cols = entities.length <= 4 ? 2 : 3;
   const rows = Math.ceil(entities.length / cols);
@@ -111,10 +115,10 @@ function projectTile(project: Project, p: Palette): TiltedGridImage {
   const stack = `<text x="28" y="${H - 26}" font-family="${SANS}" font-size="16" fill="${p.muted}">${escapeXml(project.stack.join("  /  "))}</text>`;
   const body = `<g stroke="${p.line}" stroke-width="1.2">${links}</g>${shapes}${stack}`;
 
-  return { src: toDataUri(frame(p, project.kind.toLowerCase(), project.title, body)), alt: project.title };
+  return { svg: frame(p, project.kind.toLowerCase(), project.title, body), alt: project.title };
 }
 
-function skillTile(group: SkillGroup, p: Palette): TiltedGridImage {
+function skillTile(group: SkillGroup, p: Palette): Tile {
   const charW = 9.1; // monospace advance at 15px
   const chipH = 36;
   const maxX = W - 28;
@@ -137,17 +141,33 @@ function skillTile(group: SkillGroup, p: Palette): TiltedGridImage {
   }
 
   const note = `<text x="28" y="${H - 26}" font-family="${SANS}" font-size="16" fill="${p.muted}">${escapeXml(group.description)}</text>`;
-  return { src: toDataUri(frame(p, "skills", group.category, chips.join("") + note)), alt: group.category };
+  return { svg: frame(p, "skills", group.category, chips.join("") + note), alt: group.category };
 }
 
 /** Projects interleaved with skill groups, so neighbouring tiles differ. */
-export function buildHeroTiles(projects: Project[], skills: SkillGroup[], theme: "light" | "dark"): TiltedGridImage[] {
+function buildTiles(projects: Project[], skills: SkillGroup[], theme: HeroTheme): Tile[] {
   const p = palettes[theme];
-  const tiles: TiltedGridImage[] = [];
+  const tiles: Tile[] = [];
   const length = Math.max(projects.length, skills.length);
   for (let i = 0; i < length; i++) {
     if (projects[i]) tiles.push(projectTile(projects[i], p));
     if (skills[i]) tiles.push(skillTile(skills[i], p));
   }
   return tiles;
+}
+
+export const heroThemes = ["light", "dark"] as const;
+
+/** The SVG markup for one tile, or undefined when the index is out of range. */
+export function heroTileSvg(projects: Project[], skills: SkillGroup[], theme: HeroTheme, index: number) {
+  return buildTiles(projects, skills, theme)[index]?.svg;
+}
+
+export function heroTileCount(projects: Project[], skills: SkillGroup[]) {
+  return buildTiles(projects, skills, "light").length;
+}
+
+/** The band's images: URLs of the tiles served by app/hero-tiles. */
+export function buildHeroTiles(projects: Project[], skills: SkillGroup[], theme: HeroTheme): TiltedGridImage[] {
+  return buildTiles(projects, skills, theme).map((tile, i) => ({ src: `/hero-tiles/${theme}/${i}`, alt: tile.alt }));
 }

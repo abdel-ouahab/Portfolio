@@ -72,7 +72,8 @@ interface Glyph {
   velocity: { x: number; y: number };
   outline: number;
   fill: Sprite;
-  dashes: Sprite;
+  /** Built the first time the letter is outlined; most letters never are. */
+  dashes: Sprite | null;
 }
 
 const approach = (current: number, target: number, dt: number, seconds: number) =>
@@ -174,6 +175,9 @@ export default function TechText({
     let visible = true;
     let alive = true;
     let fontsReady = false;
+    // The idle sweep waits until the page has loaded and gone quiet, so it
+    // never competes with hydration
+    let sweepReady = false;
     let dirty = true;
     let font = "";
     let ink = "#ffffff";
@@ -288,12 +292,18 @@ export default function TechText({
           velocity: { x: 0, y: 0 },
           outline: 0,
           fill: sprite(s, base, false),
-          dashes: sprite(s, base, true),
+          dashes: null,
         });
       }
       range.detach();
       dragging = -1;
       frame.index = -1;
+    };
+
+    const dashesOf = (glyph: Glyph) => {
+      const s = settingsRef.current;
+      if (!glyph.dashes && s) glyph.dashes = sprite(s, glyph, true);
+      return glyph.dashes;
     };
 
     const glyphAt = (x: number, y: number) => {
@@ -341,12 +351,13 @@ export default function TechText({
 
     const blit = (
       target: CanvasRenderingContext2D,
-      art: Sprite,
+      art: Sprite | null,
       dx: number,
       dy: number,
       originX: number,
       originY: number
     ) => {
+      if (!art) return;
       target.drawImage(
         art.image,
         Math.round((art.left + dx) * dpr - originX),
@@ -377,7 +388,7 @@ export default function TechText({
       scratchCtx.setTransform(1, 0, 0, 1, 0, 0);
       scratchCtx.globalCompositeOperation = "source-over";
       scratchCtx.clearRect(0, 0, w, h);
-      for (const glyph of glyphs) blit(scratchCtx, glyph.dashes, glyph.offset.x, glyph.offset.y, x0, y0);
+      for (const glyph of glyphs) blit(scratchCtx, dashesOf(glyph), glyph.offset.x, glyph.offset.y, x0, y0);
       scratchCtx.globalCompositeOperation = "destination-in";
       scratchCtx.fillStyle = falloff(scratchCtx, cx - x0, cy - y0, radius, 1, s.softness);
       scratchCtx.fillRect(0, 0, w, h);
@@ -521,7 +532,7 @@ export default function TechText({
       last = now;
       layout(s);
 
-      const sweeping = s.sweep && !reducedMotion && !pointer.inside && dragging < 0 && lines.length > 0;
+      const sweeping = s.sweep && sweepReady && !reducedMotion && !pointer.inside && dragging < 0 && lines.length > 0;
       if (sweeping) clock += dt * s.speed;
       pulse += dt;
       let targetX = pointer.x;
@@ -622,7 +633,7 @@ export default function TechText({
         const moved = Math.hypot(glyph.offset.x, glyph.offset.y);
         if (moved > 1) {
           ctx.globalAlpha = Math.min(1, moved / 24) * 0.55;
-          blit(ctx, glyph.dashes, 0, 0, 0, 0);
+          blit(ctx, dashesOf(glyph), 0, 0, 0, 0);
           ctx.globalAlpha = 1;
         }
       }
@@ -633,7 +644,7 @@ export default function TechText({
         }
         if (glyph.outline > 0.001) {
           ctx.globalAlpha = glyph.outline;
-          blit(ctx, glyph.dashes, glyph.offset.x, glyph.offset.y, 0, 0);
+          blit(ctx, dashesOf(glyph), glyph.offset.x, glyph.offset.y, 0, 0);
         }
         ctx.globalAlpha = 1;
       }
@@ -739,11 +750,30 @@ export default function TechText({
       onFontsReady();
     }
 
+    let idle = 0;
+    const startSweep = () => {
+      idle = 0;
+      sweepReady = true;
+      wake();
+    };
+    const scheduleSweep = () => {
+      idle = window.requestIdleCallback
+        ? window.requestIdleCallback(startSweep, { timeout: 4000 })
+        : window.setTimeout(startSweep, 1500);
+    };
+    if (document.readyState === "complete") scheduleSweep();
+    else window.addEventListener("load", scheduleSweep, { once: true });
+
     resize();
 
     return () => {
       alive = false;
       cancelAnimationFrame(raf);
+      window.removeEventListener("load", scheduleSweep);
+      if (idle) {
+        if (window.cancelIdleCallback) window.cancelIdleCallback(idle);
+        else window.clearTimeout(idle);
+      }
       invalidateRef.current = () => {};
       resizeObserver.disconnect();
       intersectionObserver.disconnect();

@@ -222,7 +222,7 @@ function ItemCard({ item }: { item: CardSwapItem }) {
         {item.image && (
           <div className="card-swap-media">
             {/* eslint-disable-next-line @next/next/no-img-element -- sized and transformed by the stack */}
-            <img src={item.image} alt={item.alt ?? item.title ?? ""} draggable={false} />
+            <img src={item.image} alt={item.alt ?? item.title ?? ""} loading="lazy" decoding="async" draggable={false} />
           </div>
         )}
       </div>

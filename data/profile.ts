@@ -17,7 +17,7 @@ export const profile: Profile = {
   cv: {
     href: "/documents/cv.pdf",
     // Flip to true after adding public/documents/cv.pdf.
-    available: false,
+    available: true,
   },
   socials: {
     github: { label: "GitHub", url: "https://github.com/abdel-ouahab" },

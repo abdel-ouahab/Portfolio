@@ -281,10 +281,31 @@ export default function PolaroidLineCarousel({
 }: PolaroidLineCarouselProps) {
   const n = slides.length
   const srcs = useSlideImages(slides)
+  // Photos are fetched only once the carousel is about half a screen away. On
+  // a phone the browser's own lazy loading reaches this far down at load.
+  const [near, setNear] = React.useState(false)
   const [active, setActive] = React.useState(0)
   const [dragging, setDragging] = React.useState(false)
   const [size, setSize] = React.useState({ w: 1200, h: 800, cw: cardWidth })
   const rootRef = React.useRef(null as HTMLDivElement | null)
+
+  React.useEffect(() => {
+    const root = rootRef.current
+    if (!root || typeof IntersectionObserver === "undefined") {
+      setNear(true)
+      return
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((e) => e.isIntersecting)) return
+        io.disconnect()
+        setNear(true)
+      },
+      { rootMargin: "50% 0px" },
+    )
+    io.observe(root)
+    return () => io.disconnect()
+  }, [])
   const pathRef = React.useRef(null as SVGPathElement | null)
   const cards = React.useRef([] as (HTMLDivElement | null)[])
   const sim = React.useRef({ off: 0, vel: 0, target: 0, a: [] as number[], w: [] as number[] })
@@ -490,7 +511,7 @@ export default function PolaroidLineCarousel({
           <div className="pl-print">
             <div className="pl-shot">
               {/* eslint-disable-next-line @next/next/no-img-element -- painted prints are data: URLs */}
-              {srcs[i] ? <img src={srcs[i]} alt={sl.alt || sl.title || ""} draggable={false} /> : null}
+              {srcs[i] && near ? <img src={srcs[i]} alt={sl.alt || sl.title || ""} loading="lazy" decoding="async" draggable={false} /> : null}
             </div>
             <div className="pl-note">{sl.title || ""}</div>
           </div>

@@ -2,31 +2,48 @@
 
 import * as React from "react";
 import { useEffect, useRef } from "react";
-import { gsap } from "gsap";
-import { ScrollTrigger } from "gsap/ScrollTrigger";
+import type { gsap as Gsap } from "gsap";
 import { cn } from "@/lib/utils";
 
 // Styles live in app/globals.css under "Cinematic section reveal".
 
-if (typeof window !== "undefined") {
-  gsap.registerPlugin(ScrollTrigger);
+// GSAP is the largest library on the page and everything that uses it sits
+// below the fold or needs a mouse, so it is fetched on first use rather than
+// shipped with the page.
+type Motion = { gsap: typeof Gsap; refresh: () => void };
+let motion: Promise<Motion> | null = null;
+
+function loadMotion() {
+  motion ??= Promise.all([import("gsap"), import("gsap/ScrollTrigger")]).then(([{ gsap }, { ScrollTrigger }]) => {
+    gsap.registerPlugin(ScrollTrigger);
+    return { gsap, refresh: () => ScrollTrigger.refresh() };
+  });
+  return motion;
 }
 
 const MOTION_OK = "(prefers-reduced-motion: no-preference)";
 
 // ScrollTrigger measures trigger positions once. Content above a panel can change
 // height without a window resize (an opened <details>, a carousel settling), so
-// one shared observer re-measures whenever the page height changes.
+// one shared observer re-measures whenever the page height changes. A refresh
+// re-measures every trigger on the page (about a hundred), so changes are
+// batched: sections settling one after another during load cost one refresh.
 let layoutWatchers = 0;
 let layoutObserver: ResizeObserver | null = null;
 
 function watchLayout() {
   layoutWatchers += 1;
   if (!layoutObserver) {
-    let frame = 0;
-    layoutObserver = new ResizeObserver(() => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => ScrollTrigger.refresh());
+    let timer = 0;
+    // ScrollTrigger measures on its own at load; only later changes matter.
+    let height = document.body.offsetHeight;
+    layoutObserver = new ResizeObserver(([entry]) => {
+      const next = Math.round(entry.contentRect.height);
+      if (Math.abs(next - height) < 1) return;
+      height = next;
+      window.clearTimeout(timer);
+      // Nothing to re-measure until some panel has loaded GSAP
+      timer = window.setTimeout(() => motion?.then((m) => m.refresh()), 200);
     });
     layoutObserver.observe(document.body);
   }
@@ -54,37 +71,53 @@ export function MagneticButton({ className, children, as: Component = "button", 
     const element = ref.current;
     if (!element) return;
 
-    const mm = gsap.matchMedia();
-    mm.add(`(hover: hover) and (pointer: fine) and ${MOTION_OK}`, () => {
-      const handleMove = (event: PointerEvent) => {
-        const rect = element.getBoundingClientRect();
-        const x = event.clientX - rect.left - rect.width / 2;
-        const y = event.clientY - rect.top - rect.height / 2;
-        gsap.to(element, {
-          x: x * 0.4,
-          y: y * 0.4,
-          rotationX: -y * 0.15,
-          rotationY: x * 0.15,
-          scale: 1.05,
-          transformPerspective: 600,
-          ease: "power2.out",
-          duration: 0.4,
+    // Touch screens never load GSAP for this
+    const query = window.matchMedia(`(hover: hover) and (pointer: fine) and ${MOTION_OK}`);
+    let mm: ReturnType<typeof Gsap.matchMedia> | null = null;
+    let live = true;
+    const attach = () => {
+      if (!query.matches || mm) return;
+      loadMotion().then(({ gsap }) => {
+        if (!live || mm) return;
+        mm = gsap.matchMedia();
+        mm.add(query.media, () => {
+          const handleMove = (event: PointerEvent) => {
+            const rect = element.getBoundingClientRect();
+            const x = event.clientX - rect.left - rect.width / 2;
+            const y = event.clientY - rect.top - rect.height / 2;
+            gsap.to(element, {
+              x: x * 0.4,
+              y: y * 0.4,
+              rotationX: -y * 0.15,
+              rotationY: x * 0.15,
+              scale: 1.05,
+              transformPerspective: 600,
+              ease: "power2.out",
+              duration: 0.4,
+            });
+          };
+
+          const handleLeave = () => {
+            gsap.to(element, { x: 0, y: 0, rotationX: 0, rotationY: 0, scale: 1, ease: "elastic.out(1, 0.3)", duration: 1.2 });
+          };
+
+          element.addEventListener("pointermove", handleMove);
+          element.addEventListener("pointerleave", handleLeave);
+          return () => {
+            element.removeEventListener("pointermove", handleMove);
+            element.removeEventListener("pointerleave", handleLeave);
+          };
         });
-      };
+      });
+    };
+    attach();
+    query.addEventListener("change", attach);
 
-      const handleLeave = () => {
-        gsap.to(element, { x: 0, y: 0, rotationX: 0, rotationY: 0, scale: 1, ease: "elastic.out(1, 0.3)", duration: 1.2 });
-      };
-
-      element.addEventListener("pointermove", handleMove);
-      element.addEventListener("pointerleave", handleLeave);
-      return () => {
-        element.removeEventListener("pointermove", handleMove);
-        element.removeEventListener("pointerleave", handleLeave);
-      };
-    });
-
-    return () => mm.revert();
+    return () => {
+      live = false;
+      query.removeEventListener("change", attach);
+      mm?.revert();
+    };
   }, []);
 
   return (
@@ -129,7 +162,7 @@ interface CinematicRevealProps {
  * `data-order` delays an element's start so a scene builds up in sequence.
  * Without motion, everything simply sits in its resting state.
  */
-function animateScene(scene: HTMLElement, trigger: HTMLElement) {
+function animateScene(gsap: typeof Gsap, scene: HTMLElement, trigger: HTMLElement) {
   const scrollTrigger = (el: HTMLElement) => ({
     trigger,
     start: `top ${Math.max(85 - Number(el.dataset.order ?? 0) * 6, 30)}%`,
@@ -168,6 +201,7 @@ function animateScene(scene: HTMLElement, trigger: HTMLElement) {
 
 export function CinematicReveal({ word, heading, marquee, children, scene, className }: CinematicRevealProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<HTMLDivElement>(null);
   const wordRef = useRef<HTMLDivElement>(null);
   const headingRef = useRef<HTMLParagraphElement>(null);
@@ -178,38 +212,73 @@ export function CinematicReveal({ word, heading, marquee, children, scene, class
     if (!wrapper) return;
 
     const stopWatching = watchLayout();
-    const mm = gsap.matchMedia();
+    let mm: ReturnType<typeof Gsap.matchMedia> | null = null;
+    let live = true;
 
-    mm.add(MOTION_OK, () => {
-      gsap.fromTo(
-        wordRef.current,
-        { y: "10vh", scale: 0.8, opacity: 0 },
-        {
-          y: "0vh",
-          scale: 1,
-          opacity: 1,
-          ease: "power1.out",
-          scrollTrigger: { trigger: wrapper, start: "top 80%", end: "bottom bottom", scrub: 1 },
-        },
-      );
+    // Every panel sits below the fold and sets up a few dozen tweens, so each is
+    // built only once it comes within a screen of the viewport, keeping that
+    // work out of the page load. Until then its contents rest in place.
+    const near = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        near.disconnect();
+        animate();
+      },
+      { rootMargin: "100% 0px" },
+    );
+    near.observe(wrapper);
 
-      gsap.fromTo(
-        [headingRef.current, actionsRef.current].filter(Boolean),
-        { y: 50, opacity: 0 },
-        {
-          y: 0,
-          opacity: 1,
-          stagger: 0.15,
-          ease: "power3.out",
-          scrollTrigger: { trigger: wrapper, start: "top 40%", end: "bottom bottom", scrub: 1 },
-        },
-      );
+    // The panel is fixed to the viewport and clipped to the wrapper, so while
+    // the wrapper is off-screen nothing of it shows. Its decorative layers are
+    // hidden then (it starts that way, see the render), so five full-screen
+    // panels aren't painted and animated out of sight.
+    const panel = panelRef.current;
+    const onScreen = new IntersectionObserver(
+      ([entry]) => {
+        if (panel) panel.toggleAttribute("data-offscreen", !entry.isIntersecting);
+      },
+      { rootMargin: "25% 0px" },
+    );
+    onScreen.observe(wrapper);
 
-      if (sceneRef.current) animateScene(sceneRef.current, wrapper);
-    });
+    const animate = () =>
+      loadMotion().then(({ gsap }) => {
+        if (!live) return;
+        mm = gsap.matchMedia();
+        mm.add(MOTION_OK, () => {
+          gsap.fromTo(
+            wordRef.current,
+            { y: "10vh", scale: 0.8, opacity: 0 },
+            {
+              y: "0vh",
+              scale: 1,
+              opacity: 1,
+              ease: "power1.out",
+              scrollTrigger: { trigger: wrapper, start: "top 80%", end: "bottom bottom", scrub: 1 },
+            },
+          );
+
+          gsap.fromTo(
+            [headingRef.current, actionsRef.current].filter(Boolean),
+            { y: 50, opacity: 0 },
+            {
+              y: 0,
+              opacity: 1,
+              stagger: 0.15,
+              ease: "power3.out",
+              scrollTrigger: { trigger: wrapper, start: "top 40%", end: "bottom bottom", scrub: 1 },
+            },
+          );
+
+          if (sceneRef.current) animateScene(gsap, sceneRef.current, wrapper);
+        });
+      });
 
     return () => {
-      mm.revert();
+      live = false;
+      near.disconnect();
+      onScreen.disconnect();
+      mm?.revert();
       stopWatching();
     };
   }, []);
@@ -226,7 +295,8 @@ export function CinematicReveal({ word, heading, marquee, children, scene, class
       // scroll the wrapper so the whole panel is uncovered.
       onFocusCapture={() => wrapperRef.current?.scrollIntoView({ block: "end" })}
     >
-      <div className="reveal-panel fixed inset-x-0 bottom-0 flex h-screen flex-col overflow-hidden bg-background text-foreground">
+      {/* Starts off-screen: below the fold, the browser skips painting its layers */}
+      <div ref={panelRef} data-offscreen="" className="reveal-panel fixed inset-x-0 bottom-0 flex h-screen flex-col overflow-hidden bg-background text-foreground">
         <div aria-hidden className="reveal-aurora pointer-events-none absolute left-[10vw] top-[20vh] h-[60vh] w-[80vw] rounded-[50%] blur-[80px]" />
         <div aria-hidden className="reveal-grid pointer-events-none absolute inset-0" />
 

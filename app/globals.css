@@ -144,6 +144,17 @@
   --pill-highlight-hover: color-mix(in oklch, var(--foreground) 20%, transparent);
 }
 
+/* Set by CinematicReveal while the panel is clipped out of view entirely. The
+   decorative (aria-hidden) layers are hidden and their loops paused; the heading
+   and pills stay rendered so they remain in the tab order. */
+.reveal-panel[data-offscreen] > [aria-hidden] {
+  visibility: hidden;
+}
+
+.reveal-panel[data-offscreen] * {
+  animation-play-state: paused;
+}
+
 @keyframes reveal-breathe {
   from { transform: scale(1); opacity: 0.6; }
   to { transform: scale(1.1); opacity: 1; }

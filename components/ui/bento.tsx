@@ -1,19 +1,13 @@
-"use client";
-
-import { MotionConfig, motion } from "motion/react";
-
 import { cn } from "@/lib/utils";
 
 // Adapted from the 21st.dev "FUI Bento Grid Dark" card: a graphic on top with a
 // frosted text panel sliding over it. Colours map to this project's tokens so the
-// card works in both themes; hover state is driven by motion variants, which
-// children (like BentoPattern) pick up through the "idle" / "active" labels.
+// card works in both themes; hover state is plain CSS on the card's `group`,
+// which children (like BentoPattern) pick up with group-hover.
 
 export function BentoGrid({ className, ...props }: React.ComponentProps<"div">) {
   return (
-    <MotionConfig reducedMotion="user">
-      <div className={cn("grid grid-cols-1 gap-4", className)} {...props} />
-    </MotionConfig>
+    <div className={cn("grid grid-cols-1 gap-4", className)} {...props} />
   );
 }
 
@@ -35,10 +29,7 @@ export function BentoCard({
   fade?: ("top" | "bottom")[];
 }) {
   return (
-    <motion.article
-      initial="idle"
-      whileHover="active"
-      variants={{ idle: {}, active: {} }}
+    <article
       data-dark={dark ? "true" : undefined}
       className={cn(
         "group relative flex flex-col overflow-hidden rounded-lg transform-gpu",
@@ -62,7 +53,7 @@ export function BentoCard({
         <h3 className="mt-1 text-xl/7 font-semibold tracking-tight sm:text-2xl/8">{title}</h3>
         <div className="mt-2 max-w-[600px] text-sm/6 text-muted">{description}</div>
       </div>
-    </motion.article>
+    </article>
   );
 }
 
@@ -74,18 +65,22 @@ export function BentoPattern({ label, live = false }: { label: string; live?: bo
   return (
     <div aria-hidden className="absolute inset-0 bg-surface-sunken dark:bg-background">
       <div className="absolute inset-0 bg-[radial-gradient(var(--line-strong)_1px,transparent_1px)] [mask-image:linear-gradient(to_bottom,black,transparent)] bg-[size:18px_18px] opacity-70" />
-      <motion.div
-        className="absolute -right-16 -top-20 size-72 rounded-full bg-accent/25 blur-3xl dark:bg-accent/20"
-        variants={{ idle: { x: 0, y: 0, scale: 1 }, active: { x: -40, y: 20, scale: 1.15 } }}
-        transition={{ type: "spring", stiffness: 120, damping: 20 }}
+      <div
+        className={cn(
+          "absolute -right-16 -top-20 size-72 rounded-full bg-accent/25 blur-3xl dark:bg-accent/20",
+          "transition-[translate,scale] duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none",
+          "group-hover:-translate-x-10 group-hover:translate-y-5 group-hover:scale-115",
+        )}
       />
-      <motion.span
-        className="absolute right-6 top-4 font-mono text-7xl font-semibold tracking-tighter text-transparent [-webkit-text-stroke:1px_var(--line-strong)] sm:text-8xl"
-        variants={{ idle: { y: 0, opacity: 0.9 }, active: { y: -6, opacity: 1 } }}
-        transition={{ type: "spring", stiffness: 200, damping: 22 }}
+      <span
+        className={cn(
+          "absolute right-6 top-4 font-mono text-7xl font-semibold tracking-tighter text-transparent opacity-90 [-webkit-text-stroke:1px_var(--line-strong)] sm:text-8xl",
+          "transition-[translate,opacity] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none",
+          "group-hover:-translate-y-1.5 group-hover:opacity-100",
+        )}
       >
         {label}
-      </motion.span>
+      </span>
       {live && (
         <span className="absolute left-6 top-6 inline-flex items-center gap-2 rounded-full border border-line bg-surface/80 px-2.5 py-1 text-xs font-medium text-foreground backdrop-blur">
           <span className="relative flex size-2">
